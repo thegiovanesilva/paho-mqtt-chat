@@ -1,21 +1,18 @@
-[project]
+[tool.poetry]
 name = "mqtt-chat"
 version = "1.0.0"
 description = "A text chat using paho-mqtt"
-authors = [
-    {name = "Your Name",email = "you@example.com"}
-]
+authors = ["Your Name <you@example.com>"]
 readme = "README.md"
-requires-python = ">=3.13"
-dependencies = [
-    "paho-mqtt (>=2.1.0,<3.0.0)"
-]
+packages = [{include = "*.py"}]
 
-[project.optional-dependencies]
-dev = [
-    "pyinstaller>=6.0.0"
-]
+[tool.poetry.dependencies]
+python = "^3.13"
+paho-mqtt = "^2.1.0"
+
+[tool.poetry.group.dev.dependencies]
+pyinstaller = "^6.0.0"
 
 [build-system]
-requires = ["poetry-core>=2.0.0,<3.0.0"]
+requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"

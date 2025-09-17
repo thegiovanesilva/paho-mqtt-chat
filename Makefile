@@ -2,15 +2,15 @@
 
 # Instala dependências
 install:
-	pip install -e ".[dev]"
+	poetry install --with dev
 
 # Instala apenas dependências básicas
 install-prod:
-	pip install -e .
+	poetry install --only main
 
 # Builda o binário
 build: install
-	pyinstaller mqtt-chat.spec
+	poetry run pyinstaller mqtt-chat.spec
 
 # Testa o binário
 test-binary:

@@ -6,12 +6,13 @@ Um chat de texto usando paho-mqtt.
 
 ### Pré-requisitos
 - Python 3.13+
+- Poetry
 - Broker MQTT rodando em `127.0.0.1:1883`
 
 ### Instalação e execução
 ```bash
-pip install -e .
-python main.py
+poetry install
+poetry run python main.py
 ```
 
 ## Build do binário
@@ -47,13 +48,13 @@ make run-binary
 make clean
 ```
 
-#### Usando PyInstaller diretamente
+#### Usando Poetry diretamente
 ```bash
 # Instalar dependências
-pip install -e ".[dev]"
+poetry install --with dev
 
 # Buildar
-pyinstaller mqtt-chat.spec
+poetry run pyinstaller mqtt-chat.spec
 
 # O binário estará em dist/mqtt-chat
 ```
