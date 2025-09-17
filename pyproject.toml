@@ -7,7 +7,7 @@ readme = "README.md"
 packages = [{include = "*.py"}]
 
 [tool.poetry.dependencies]
-python = "^3.13"
+python = "^3.12"
 paho-mqtt = "^2.1.0"
 
 [tool.poetry.group.dev.dependencies]

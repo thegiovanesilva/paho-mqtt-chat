@@ -5,7 +5,7 @@ Um chat de texto usando paho-mqtt.
 ## Executando o programa
 
 ### Pré-requisitos
-- Python 3.13+
+- Python 3.12+
 - Poetry
 - Broker MQTT rodando em `127.0.0.1:1883`
 
