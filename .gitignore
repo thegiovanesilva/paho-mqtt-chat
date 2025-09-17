@@ -1,0 +1,9 @@
+__pycache__/
+*.py[cod]
+.venv/
+env/
+groups.json
+poetry.lock
+sessions.json
+users.json
+messages.json
