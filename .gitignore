@@ -7,3 +7,8 @@ poetry.lock
 sessions.json
 users.json
 messages.json
+
+# PyInstaller build files
+build/
+dist/
+*.spec~

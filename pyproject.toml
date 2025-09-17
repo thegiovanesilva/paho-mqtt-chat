@@ -11,6 +11,10 @@ dependencies = [
     "paho-mqtt (>=2.1.0,<3.0.0)"
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pyinstaller>=6.0.0"
+]
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
