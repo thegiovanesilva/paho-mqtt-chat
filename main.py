@@ -1,324 +1,229 @@
 import paho.mqtt.client as mqtt
 import json
 import time
+from typing import Dict, List
+from queue import Queue
 import threading
-import queue
 
 BROKER = "127.0.0.1"
 PORT = 1883
 
-print("=== MQTT CHAT ===")
 USER_ID = input("Digite seu ID: ")
 
-control_queue = queue.Queue()
-messages_queue = queue.Queue()
-ui_lock = threading.Lock()  # Lock para controlar acesso à interface
+USERS_TOPIC = "USERS"
+GROUPS_TOPIC = "GROUPS"
 
-# Estruturas em memória (mais simples que arquivos JSON)
-active_sessions = {}  # sessões ativas do usuário
-my_groups = {}  # grupos que participo
-online_users = set()  # usuários online
-pending_messages = []  # mensagens que chegaram durante input do usuário
+connected_users: Dict[str, str] = {}
+pending_notifications: Queue = Queue()
+notification_event = threading.Event()
 
 def on_connect(client, userdata, flags, rc, properties):
     print("Conectado ao broker MQTT")
-    client.subscribe(f"{USER_ID}_Control")
-    client.subscribe("USERS")
-    client.subscribe("GROUPS")
-    
-    restore_session_subscriptions()
+    client.subscribe(f"{USER_ID}_Control", qos=2)
+    client.subscribe(f"{USERS_TOPIC}/+", qos=2)
+    client.publish(f"{USERS_TOPIC}/{USER_ID}", "online", qos=2, retain=True)
+    print(f"[Status] user '{USER_ID}' is now online")
+
+def on_disconnect(client, userdata, rc):
+    print(f"[Status] user '{USER_ID}' is now offline")
 
 def on_message(client, userdata, msg):
-    payload = msg.payload.decode()
-    try:
-        data = json.loads(payload)
-    except json.JSONDecodeError:
-        data = payload
-
-
-    if msg.topic == "USERS":
-        user = data['user']
-        status = data['status']
-        if status == "online":
-            online_users.add(user)
-        else:
-            online_users.discard(user)
-        print(f"[STATUS] Usuário {user} -> {status}")
-
-    elif msg.topic == "GROUPS":
-        # Processa informações de grupo
-        if isinstance(data, dict) and 'leader' in data:
-            print(f"[GRUPO] Novo grupo criado por {data['leader']}")
-        else:
-            print(f"[GRUPO] {data}")
-
+    payload = msg.payload.decode()    
+    if msg.topic.startswith(USERS_TOPIC):
+        user_id = msg.topic.split('/')[-1]
+        status = payload
+        connected_users[user_id] = status
     elif msg.topic == f"{USER_ID}_Control":
-        handle_control_message(data)
-
-    else:
-        # Mensagem de chat recebida via MQTT - adiciona à fila para exibir de forma organizada
-        message_info = {
-            "topic": msg.topic,
-            "content": payload,
-            "timestamp": time.time()
-        }
-        pending_messages.append(message_info)
-        
-        # Se não estamos no meio de um input, mostra imediatamente
-        if ui_lock.acquire(blocking=False):
-            try:
-                display_pending_messages()
-            finally:
-                ui_lock.release()
-
-
-# Funções de controle de interface
-def display_pending_messages():
-    """Exibe mensagens pendentes de forma organizada"""
-    if not pending_messages:
-        return
-    
-    print("\n" + "="*50)
-    for msg in pending_messages:
-        timestamp = time.strftime("%H:%M:%S", time.localtime(msg['timestamp']))
-        print(f"[{timestamp}] 💬 {msg['topic']}: {msg['content']}")
-    print("="*50)
-    
-    # Limpa as mensagens após exibir
-    pending_messages.clear()
-
-def safe_input(prompt):
-    """Input que não é interrompido por mensagens MQTT"""
-    with ui_lock:
-        # Mostra mensagens pendentes antes do input
-        display_pending_messages()
-        return input(prompt)
-
-def restore_session_subscriptions():
-    """Restaura inscrições em sessões e grupos (dados em memória)"""
-    try:
-        session_count = len(active_sessions)
-        group_count = len(my_groups)
-        
-        # Reinscreve em sessões ativas
-        for session_topic in active_sessions:
-            client.subscribe(session_topic, qos=1)
-        
-        # Reinscreve em grupos
-        for group_name in my_groups:
-            client.subscribe(group_name, qos=1)
-        
-        if session_count > 0 or group_count > 0:
-            print(f"[INFO] Restauradas {session_count} sessões e {group_count} grupos")
-    except Exception as e:
-        print(f"Erro ao restaurar inscrições: {e}")
-
-def handle_control_message(data):
-    control_queue.put(data)
-
-def process_control_messages():
-    while True:
         try:
-            data = control_queue.get(timeout=0.1)
-            if data.get("type") == "chat_request":
-                print(f"\n[CHAT REQUEST] {data['from']} quer iniciar chat")
-                print("Digite 'aceitar' ou 'recusar' na próxima opção do menu.")
-                pending_requests[data['from']] = data
-            elif data.get("type") == "chat_accept":
-                session_topic = data['session']
-                print(f"\n[INFO] Solicitação aceita! Sessão: {session_topic}")
-                
-                # Adiciona à lista de sessões ativas
-                active_sessions[session_topic] = {"users": [USER_ID]}  # Não sabemos o outro usuário aqui
-                
-                client.subscribe(session_topic, qos=1)
-                print(f"[INFO] Você agora está inscrito para receber mensagens em: {session_topic} (com garantia)")
-        except queue.Empty:
-            continue
-        except Exception as e:
-            print(f"Erro ao processar mensagem de controle: {e}")
+            control_message = json.loads(payload)
+            action = control_message.get("action")
+            from_user = control_message.get("from")
+            if action == "chat_request" and from_user:
+                pending_notifications.put(("chat_request", from_user))
+                notification_event.set()
+                print(f"\nNova solicitação de chat de '{from_user}'! Digite '7' no menu para responder.")
+            elif action == "chat_accepted" and from_user:
+                pending_notifications.put(("chat_accepted", from_user))
+                notification_event.set()
+                print(f"\nSua solicitação de chat foi aceita por '{from_user}'!")
+        except json.JSONDecodeError:
+            print("Mensagem de controle inválida recebida.")
 
 
-def join_session():
-    session_topic = safe_input("Digite o tópico da sessão: ")
-    client.subscribe(session_topic, qos=1)
-    print(f"[INFO] Inscrito no tópico: {session_topic}")
-    print("Agora você pode receber mensagens desta sessão (com garantia de entrega)!")
-    
-
-pending_requests = {}
-
-
-def menu():
-    while True:
-        # Mostra mensagens pendentes antes do menu
-        with ui_lock:
-            display_pending_messages()
-        
-        if pending_requests:
-            print(f"\n[ATENÇÃO] Você tem {len(pending_requests)} solicitação(ões) de chat pendente(s)!")
-            for user in pending_requests.keys():
-                print(f"  - {user}")
-        
-        print("\n--- MENU ---")
-        print("1. Listar usuários")
-        print("2. Solicitar conversa (one-to-one)")
-        print("3. Criar grupo")
-        print("4. Listar grupos")
-        print("5. Entrar em sessão/grupo")
-        print("6. Enviar mensagem")
-        print("7. Responder solicitações de chat")
-        print("8. Listar grupos que participo")
-        print("9. Listar minhas conversas")
-        print("10. Sair")
-        choice = safe_input("> ")
-
-        if choice == "1":
-            list_users()
-        elif choice == "2":
-            request_chat()
-        elif choice == "3":
-            create_group()
-        elif choice == "4":
-            list_groups()
-        elif choice == "5":
-            join_session()
-        elif choice == "6":
-            send_message()
-        elif choice == "7":
-            handle_pending_requests()
-        elif choice == "8":
-            list_my_groups()
-        elif choice == "9":
-            list_my_conversations()
-        elif choice == "10":
-            exit_program()
-            break
-        
-        else:
-            print("Opção inválida!")
-
-def list_users():
-    print(f"\nUsuários online ({len(online_users)}):")
-    if online_users:
-        for user in sorted(online_users):
-            print(f"  • {user}")
-    else:
-        print("  Nenhum usuário online no momento.")
+def get_online_users():
+    return [user_id for user_id, status in connected_users.items() if status == "online"]
 
 def request_chat():
-    target = safe_input("Digite o ID do usuário: ")
-    client.publish(f"{target}_Control", json.dumps({"type":"chat_request","from":USER_ID}))
-    
-def create_group():
-    group_name = safe_input("Nome do grupo: ")
-    if group_name in my_groups:
-        print("Você já participa deste grupo!")
+    target_user_id = input("Digite o ID do usuário com quem deseja conversar: ")
+    if target_user_id == USER_ID:
+        print("Você não pode iniciar uma conversa consigo mesmo.")
+        return
+    if target_user_id not in connected_users or connected_users[target_user_id] != "online":
+        print(f"Usuário '{target_user_id}' não está online.")
+        return
+
+    target_user_topic = f"{target_user_id}_Control"
+    message = json.dumps({
+        "action": "chat_request",
+        "from": USER_ID
+    })
+    client.publish(target_user_topic, message, qos=2)
+    print(f"Solicitação de chat enviada para '{target_user_id}'")
+
+def process_pending_notifications():
+    if pending_notifications.empty():
+        print("Nenhuma notificação pendente.")
         return
     
-    # Adiciona aos meus grupos
-    my_groups[group_name] = {"leader": USER_ID, "members": [USER_ID]}
+    print("\n=== Notificações Pendentes ===")
+    notifications_to_process = []
     
-    # Se inscreve automaticamente no grupo
-    client.subscribe(group_name, qos=1)
+    while not pending_notifications.empty():
+        notifications_to_process.append(pending_notifications.get())
     
-    # Notifica outros usuários sobre o novo grupo
-    client.publish("GROUPS", json.dumps({"name": group_name, "leader": USER_ID, "members": [USER_ID]}))
+    for i, (action, from_user) in enumerate(notifications_to_process, 1):
+        if action == "chat_request":
+            print(f"{i}. Solicitação de chat de '{from_user}'")
+        elif action == "chat_accepted":
+            print(f"{i}. Chat aceito por '{from_user}'")
     
-    print(f"Grupo {group_name} criado!")
-    print(f"[INFO] Você está automaticamente inscrito no grupo: {group_name}")
+    if not notifications_to_process:
+        return
+    
+    choice = input("\nDigite o número da notificação para processar (ou Enter para sair): ")
+    
+    try:
+        choice_idx = int(choice) - 1
+        if 0 <= choice_idx < len(notifications_to_process):
+            action, from_user = notifications_to_process[choice_idx]
+            
+            if action == "chat_request":
+                handle_chat_request(from_user)
+            elif action == "chat_accepted":
+                handle_chat_accepted(from_user)
+            
+            for i, notification in enumerate(notifications_to_process):
+                if i != choice_idx:
+                    pending_notifications.put(notification)
+        else:
+            for notification in notifications_to_process:
+                pending_notifications.put(notification)
+            print("Número inválido.")
+    except ValueError:
+        for notification in notifications_to_process:
+            pending_notifications.put(notification)
+
+def handle_chat_request(from_user_id):
+    response = input(f"Você tem uma solicitação de chat de '{from_user_id}'. Aceitar? (s/n): ")
+    if response.lower() == 's':
+        print(f"Iniciando chat com '{from_user_id}'...")
+        one_to_one_topic = f"CHATS/{USER_ID}_{from_user_id}"
+        client.publish(f"{from_user_id}_Control", json.dumps({
+            "action": "chat_accepted",
+            "from": USER_ID
+        }), qos=2)
+        print(f"Chat iniciado no tópico '{one_to_one_topic}'")
+        client.subscribe(one_to_one_topic, qos=2)
+    else:
+        print("Solicitação de chat recusada.")
+
+def handle_chat_accepted(from_user_id):
+    print(f"Sua solicitação de chat foi aceita por '{from_user_id}'.")
+    one_to_one_topic = f"CHATS/{USER_ID}_{from_user_id}"
+    print(f"Chat iniciado no tópico '{one_to_one_topic}'")
+    client.subscribe(one_to_one_topic, qos=2)
+
+def list_users():
+    print('=== Usuários ===')
+    if not connected_users:
+        print('Nenhum usuário encontrado. Aguarde as mensagens retained do broker...')
+    else:
+        online_users = get_online_users()
+        offline_users = [user_id for user_id, status in connected_users.items() if status == "offline"]
+        
+        if online_users:
+            print(f'Online ({len(online_users)}):')
+            for user in online_users:
+                print(f"  • {user}")
+        
+        if offline_users:
+            print(f'Offline ({len(offline_users)}):')
+            for user in offline_users:
+                print(f"  • {user}")
+    
+    input("\nPressione Enter para continuar...")
+
+def create_group():
+    group_name = input("Digite o nome do grupo: ")
+    if not group_name:
+        print("Nome do grupo não pode ser vazio.")
+        return
+    
 
 def list_groups():
-    print("Funcionalidade simplificada - use 'Listar meus grupos' para ver seus grupos.")
+    print('=== Grupos ===')
+    input("\nPressione Enter para continuar...")
 
-def list_my_groups():
-    """Lista grupos dos quais o usuário participa (dados em memória)"""
-    if not my_groups:
-        print("Você não participa de nenhum grupo.")
-        return
+def menu():
+    pending_count = pending_notifications.qsize()
+    notification_indicator = f" 🔔({pending_count})" if pending_count > 0 else ""
     
-    print(f"\n👥 Seus grupos ({len(my_groups)}):")
-    group_list = list(my_groups.items())
-    for i, (group_name, group_info) in enumerate(group_list, 1):
-        is_leader = group_info.get("leader") == USER_ID
-        leader_status = " [LÍDER]" if is_leader else ""
-        
-        print(f"{i}. {group_name}{leader_status}")
-        print(f"   Líder: {group_info.get('leader', 'N/A')}")
-        print(f"   Membros: {', '.join(group_info.get('members', []))}")
-        print()
-    
-    choice = safe_input("Digite o número do grupo para se reinscrever (ou Enter para voltar): ")
-    if choice.isdigit() and 1 <= int(choice) <= len(group_list):
-        selected_group = group_list[int(choice) - 1][0]
-        client.subscribe(selected_group, qos=1)
-        print(f"[INFO] Reinscrito no grupo: {selected_group}")
-        print("Agora você pode receber mensagens do grupo!")
+    print(f"\n--- MENU{notification_indicator} ---")
+    print("1. Listar usuários")
+    print("2. Solicitar conversa (one-to-one)")
+    print("3. Criar grupo")
+    print("4. Listar grupos")
+    print("5. Entrar em sessão/grupo")
+    print("6. Enviar mensagem")
+    print("7. Responder solicitações de chat")
+    print("8. Listar grupos que participo")
+    print("9. Listar minhas conversas")
+    print("0. Sair")
+    choice = input("> ")
 
-def send_message():
-    topic = safe_input("Digite o tópico da sessão ou grupo: ")
-    msg = safe_input("Mensagem: ")
-    client.publish(topic, msg, qos=1)
-    print("Mensagem enviada com garantia de entrega!")
-
-def list_my_conversations():
-    """Lista todas as conversas/sessões ativas do usuário (dados em memória)"""
-    if not active_sessions:
-        print("Você não tem conversas ativas.")
-        return
-    
-    print(f"\n💬 Suas conversas ativas ({len(active_sessions)}):")
-    session_list = list(active_sessions.items())
-    for i, (topic, data) in enumerate(session_list, 1):
-        other_users = [u for u in data["users"] if u != USER_ID] if "users" in data else []
-        print(f"{i}. {topic}")
-        if "users" in data:
-            print(f"   Participantes: {', '.join(data['users'])}")
-            print(f"   Outros usuários: {', '.join(other_users) if other_users else 'Só você'}")
-        print()
-    
-    choice = safe_input("Digite o número da conversa para se reinscrever (ou Enter para voltar): ")
-    if choice.isdigit() and 1 <= int(choice) <= len(session_list):
-        selected_topic = session_list[int(choice) - 1][0]
-        client.subscribe(selected_topic, qos=1)
-        print(f"[INFO] Reinscrito em: {selected_topic}")
-
-def handle_pending_requests():
-    if not pending_requests:
-        print("Nenhuma solicitação pendente.")
-        return
-    
-    print("\nSolicitações pendentes:")
-    for user, data in pending_requests.copy().items():
-        print(f"\n{user} quer iniciar chat")
-        resp = safe_input("Aceitar? (s/n): ").lower()
-        if resp == "s":
-            timestamp = int(time.time())
-            session_topic = f"{USER_ID}_{data['from']}_{timestamp}"
-            
-            # Adiciona às sessões ativas em memória
-            active_sessions[session_topic] = {"users": [USER_ID, data['from']]}
-            
-            # Informa ao solicitante o tópico da sessão
-            client.publish(f"{data['from']}_Control", json.dumps({"type":"chat_accept","session":session_topic}))
-            
-            # Se inscreve no tópico da sessão para receber mensagens com QoS 1
-            client.subscribe(session_topic, qos=1)
-            
-            print(f"[INFO] Chat iniciado no tópico: {session_topic}")
-            print(f"[INFO] Você agora está inscrito para receber mensagens em: {session_topic} (com garantia)")
+    if choice == "1":
+        list_users()
+    elif choice == "2":
+        online_users = get_online_users()
+        if online_users:
+            print("Usuários online disponíveis para chat:")
+            for i, user in enumerate(online_users, 1):
+                if user != USER_ID:  # Não mostrar o próprio usuário
+                    print(f"{i}. {user}")
         else:
-            print("Solicitação recusada.")
-        
-        # Remove da lista de pendentes
-        del pending_requests[user]
+            print("Nenhum usuário online no momento.")
+        request_chat()
+    elif choice == "3":
+        create_group()
+    elif choice == "4":
+        pass
+    elif choice == "5":
+        pass
+    elif choice == "6":
+        pass
+    elif choice == "7":
+        process_pending_notifications()
+    elif choice == "8":
+        pass
+    elif choice == "9":
+        pass
+    elif choice == "0":
+        exit_program()
+        return False
+    
+    else:
+        print("Opção inválida!")
+    return True
+
+
 
 def exit_program():
-    client.publish("USERS", json.dumps({"user": USER_ID, "status": "offline"}))
+    client.publish(f"{USERS_TOPIC}/{USER_ID}", "offline", qos=2, retain=True)
+    client.loop_stop()
     client.disconnect()
-    print("Desconectado!")
+    print(f"{USER_ID} Desconectado!")
 
-# Inicializa MQTT
+
 client = mqtt.Client(
     mqtt.CallbackAPIVersion.VERSION2,
     client_id=USER_ID, 
@@ -326,16 +231,19 @@ client = mqtt.Client(
 )
 client.on_connect = on_connect
 client.on_message = on_message
+
+client.will_set(f"{USERS_TOPIC}/{USER_ID}", "offline", qos=2, retain=True)
+
 client.connect(BROKER, PORT)
 client.loop_start()
 
-# Sinaliza presença online
-client.publish("USERS", json.dumps({"user": USER_ID, "status": "online"}))
-online_users.add(USER_ID)
 
-# Inicia thread para processar mensagens de controle
-control_thread = threading.Thread(target=process_control_messages, daemon=True)
-control_thread.start()
 
-# Menu principal (executa na thread principal)
-menu()
+while menu():
+    print()
+
+
+
+    
+
+
