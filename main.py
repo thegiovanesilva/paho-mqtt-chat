@@ -16,11 +16,13 @@ GROUPS_TOPIC = "GROUPS"
 connected_users: Dict[str, str] = {}
 pending_notifications: Queue = Queue()
 notification_event = threading.Event()
+chats: set[str] = set()
 
-def on_connect(client, userdata, flags, rc, properties):
+def on_connect(client: mqtt.Client, userdata, flags, rc, properties):
     print("Conectado ao broker MQTT")
     client.subscribe(f"{USER_ID}_Control", qos=2)
     client.subscribe(f"{USERS_TOPIC}/+", qos=2)
+    client.subscribe(f"{USERS_TOPIC}/{USER_ID}/CHATS", qos=2)
     client.publish(f"{USERS_TOPIC}/{USER_ID}", "online", qos=2, retain=True)
     print(f"[Status] user '{USER_ID}' is now online")
 
@@ -35,9 +37,11 @@ def on_message(client, userdata, msg):
         connected_users[user_id] = status
     elif msg.topic == f"{USER_ID}_Control":
         try:
-            control_message = json.loads(payload)
+            control_message: dict[str, any] = json.loads(payload)
             action = control_message.get("action")
             from_user = control_message.get("from")
+            value: str = control_message.get("value")
+            print(control_message)
             if action == "chat_request" and from_user:
                 pending_notifications.put(("chat_request", from_user))
                 notification_event.set()
@@ -45,13 +49,32 @@ def on_message(client, userdata, msg):
             elif action == "chat_accepted" and from_user:
                 pending_notifications.put(("chat_accepted", from_user))
                 notification_event.set()
+                
                 print(f"\nSua solicitação de chat foi aceita por '{from_user}'!")
+            elif action == "chats" and value:
+                [chats.add(v) for v in value.split(";")]
+
         except json.JSONDecodeError:
             print("Mensagem de controle inválida recebida.")
+    else: 
+        control_message: dict[str, any] = json.loads(payload)
+        action = control_message.get("action")
+        from_user = control_message.get("from")
+        value: str = control_message.get("value")
+        if action == "message" and value:
+            
+            user_from = control_message.get("from") 
+            if (user_from != USER_ID):
+                print(f"[{user_from}] > {value}")
+            
+            input("...")    
 
 
 def get_online_users():
     return [user_id for user_id, status in connected_users.items() if status == "online"]
+
+def get_offline_users():
+    return [user_id for user_id, status in connected_users.items() if status == "offline"]
 
 def request_chat():
     target_user_id = input("Digite o ID do usuário com quem deseja conversar: ")
@@ -114,24 +137,25 @@ def process_pending_notifications():
             pending_notifications.put(notification)
 
 def handle_chat_request(from_user_id):
-    response = input(f"Você tem uma solicitação de chat de '{from_user_id}'. Aceitar? (s/n): ")
-    if response.lower() == 's':
-        print(f"Iniciando chat com '{from_user_id}'...")
-        one_to_one_topic = f"CHATS/{USER_ID}_{from_user_id}"
+    response = input(f"Você tem uma solicitação de chat de '{from_user_id}'. Aceitar? (S/n): ")
+    if response.lower() == 'n':
+        print("Solicitação de chat recusada.")
+    else:
+        one_to_one_topic = f"{USER_ID}_{from_user_id}"
         client.publish(f"{from_user_id}_Control", json.dumps({
             "action": "chat_accepted",
             "from": USER_ID
         }), qos=2)
         print(f"Chat iniciado no tópico '{one_to_one_topic}'")
         client.subscribe(one_to_one_topic, qos=2)
-    else:
-        print("Solicitação de chat recusada.")
-
+        chats.add(one_to_one_topic)
+  
 def handle_chat_accepted(from_user_id):
     print(f"Sua solicitação de chat foi aceita por '{from_user_id}'.")
-    one_to_one_topic = f"CHATS/{USER_ID}_{from_user_id}"
+    one_to_one_topic = f"{USER_ID}_{from_user_id}"
     print(f"Chat iniciado no tópico '{one_to_one_topic}'")
     client.subscribe(one_to_one_topic, qos=2)
+    chats.add(one_to_one_topic)
 
 def list_users():
     print('=== Usuários ===')
@@ -139,7 +163,7 @@ def list_users():
         print('Nenhum usuário encontrado. Aguarde as mensagens retained do broker...')
     else:
         online_users = get_online_users()
-        offline_users = [user_id for user_id, status in connected_users.items() if status == "offline"]
+        offline_users = get_offline_users()
         
         if online_users:
             print(f'Online ({len(online_users)}):')
@@ -153,12 +177,29 @@ def list_users():
     
     input("\nPressione Enter para continuar...")
 
+def list_chats():
+    print('=== Conversas ===')
+    if len(chats) == 0:
+        print('Nenhum conversa encontrada.')
+    else:
+        [print(f"({index}). {id_chat}") for index, id_chat in enumerate(chats, 1)]
+
 def create_group():
     group_name = input("Digite o nome do grupo: ")
     if not group_name:
         print("Nome do grupo não pode ser vazio.")
         return
-    
+
+def send_message():
+    list_chats()
+    to = input("Digite o id da conversa")
+    message = input("[você] > ")
+    client.publish(to, json.dumps({
+        "action": "message",
+        "from": USER_ID, 
+        "value": message
+    }), 2)
+    input("...")
 
 def list_groups():
     print('=== Grupos ===')
@@ -166,7 +207,7 @@ def list_groups():
 
 def menu():
     pending_count = pending_notifications.qsize()
-    notification_indicator = f" 🔔({pending_count})" if pending_count > 0 else ""
+    notification_indicator = f"({pending_count}) Existem solicitações pendentes" if pending_count > 0 else ""
     
     print(f"\n--- MENU{notification_indicator} ---")
     print("1. Listar usuários")
@@ -185,13 +226,20 @@ def menu():
         list_users()
     elif choice == "2":
         online_users = get_online_users()
-        if online_users:
+        
+        if online_users and len(online_users) > 1:
             print("Usuários online disponíveis para chat:")
             for i, user in enumerate(online_users, 1):
-                if user != USER_ID:  # Não mostrar o próprio usuário
+                if user != USER_ID:
                     print(f"{i}. {user}")
-        else:
-            print("Nenhum usuário online no momento.")
+
+        offline_users = get_offline_users()
+        if len(offline_users) > 0:
+            print("Usuários offline:")
+            for i, user in enumerate(offline_users, 1):
+                if user != USER_ID:
+                    print(f"{i}. {user}")
+
         request_chat()
     elif choice == "3":
         create_group()
@@ -200,13 +248,14 @@ def menu():
     elif choice == "5":
         pass
     elif choice == "6":
-        pass
+        send_message()
     elif choice == "7":
         process_pending_notifications()
     elif choice == "8":
         pass
     elif choice == "9":
-        pass
+        list_chats()
+        input("\nPressione Enter para continuar...")
     elif choice == "0":
         exit_program()
         return False
@@ -219,6 +268,10 @@ def menu():
 
 def exit_program():
     client.publish(f"{USERS_TOPIC}/{USER_ID}", "offline", qos=2, retain=True)
+    client.publish(f"{USERS_TOPIC}/{USER_ID}/CHATS", json.dumps({
+        "action": "chats",
+        "value": ";".join(chats)
+    }), qos=2, retain=True)
     client.loop_stop()
     client.disconnect()
     print(f"{USER_ID} Desconectado!")
@@ -236,8 +289,6 @@ client.will_set(f"{USERS_TOPIC}/{USER_ID}", "offline", qos=2, retain=True)
 
 client.connect(BROKER, PORT)
 client.loop_start()
-
-
 
 while menu():
     print()
