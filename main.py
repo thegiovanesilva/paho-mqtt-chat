@@ -39,6 +39,7 @@ def on_message(client, userdata, msg):
 
     if msg.topic.endswith("/chats"):
         control_message: dict[str, any] = json.loads(payload)
+        print("entrou aqui", control_message, payload)
         value: str = control_message.get("value")
         if (len(value) > 0): 
             value = value.split(";")
@@ -73,6 +74,7 @@ def on_message(client, userdata, msg):
                 except json.JSONDecodeError:
                     pass
             elif message_type == "chat":
+                print("SAI CAPIROTO")
                 try:
                     chat_message = json.loads(payload)
                     action = chat_message.get("action")
@@ -82,7 +84,7 @@ def on_message(client, userdata, msg):
                     if action == "message" and from_user != USER_ID:
                         if USER_ID in groups.get(group_name, {}).get("members", []):
                             print(f"\n[{group_name}] {from_user}: {value}")
-                            input("Pressione Enter para continuar...")
+                            #input("Pressione Enter para continuar...")
                 except json.JSONDecodeError:
                     pass
     elif msg.topic == f"{USER_ID}_Control":
@@ -151,7 +153,7 @@ def on_message(client, userdata, msg):
             if (user_from != USER_ID):
                 print(f"[{user_from}] > {value}")
             
-            input("...")    
+            # input("...")    
 
 
 def get_online_users():
@@ -164,7 +166,7 @@ def save_chats():
     client.publish(f"{USERS_TOPIC}/{USER_ID}/chats", json.dumps({
         "action": "chats",
         "value": ";".join(chats)
-    }), qos=2, retain=True)
+    }), qos=1, retain=True)
 
 def request_chat():
     target_user_id = input("Digite o ID do usuário com quem deseja conversar: ")
@@ -348,7 +350,7 @@ def handle_chat_request(from_user_id):
             "from": USER_ID,
             "value": one_to_one_topic
         }), qos=2)
-        # print(f"Chat iniciado no tópico '{one_to_one_topic}'")
+        print(f"Chat iniciado no tópico '{one_to_one_topic}'")
         client.subscribe(one_to_one_topic, qos=2)
         chats.add(one_to_one_topic)
         save_chats()
@@ -379,7 +381,7 @@ def list_users():
             for user in offline_users:
                 print(f"  • {user}")
     
-    input("\nPressione Enter para continuar...")
+    # input("\nPressione Enter para continuar...")
 
 def list_chats():
     print('=== Conversas ===')
@@ -421,13 +423,13 @@ def create_group():
     print(f"Grupo '{group_name}' criado com sucesso!")
     print(f"Você é o líder do grupo '{group_name}'")
     
-    input("\nPressione Enter para continuar...")
+    # input("\nPressione Enter para continuar...")
 
 def join_group():
     """Função para entrar em um grupo existente ou solicitar entrada"""
     if not groups:
         print("Nenhum grupo disponível no momento.")
-        input("\nPressione Enter para continuar...")
+        # input("\nPressione Enter para continuar...")
         return
     
     available_groups = []
@@ -439,7 +441,7 @@ def join_group():
     
     if not available_groups:
         print("Você já participa de todos os grupos disponíveis.")
-        input("\nPressione Enter para continuar...")
+        # input("\nPressione Enter para continuar...")
         return
     
     print("=== Grupos Disponíveis para Entrada ===")
@@ -464,7 +466,7 @@ def join_group():
             
             if USER_ID in group_info.get("members", []):
                 print(f"Você já é membro do grupo '{group_name}'.")
-                input("\nPressione Enter para continuar...")
+                # input("\nPressione Enter para continuar...")
                 return
             
             leader = group_info.get("leader")
@@ -477,7 +479,7 @@ def join_group():
     except ValueError:
         print("Cancelado.")
     
-    input("\nPressione Enter para continuar...")
+    # input("\nPressione Enter para continuar...")
 
 def request_group_join(group_name, leader):
     """Solicita entrada em um grupo"""
@@ -497,7 +499,7 @@ def invite_to_group():
     
     if not my_led_groups:
         print("Você não é líder de nenhum grupo.")
-        input("\nPressione Enter para continuar...")
+        # input("\nPressione Enter para continuar...")
         return
     
     print("=== Seus Grupos (Como Líder) ===")
@@ -521,7 +523,7 @@ def invite_to_group():
             
             if not available_users:
                 print("Nenhum usuário disponível para convite.")
-                input("\nPressione Enter para continuar...")
+                # input("\nPressione Enter para continuar...")
                 return
             
             print("\n=== Usuários Disponíveis ===")
@@ -544,7 +546,7 @@ def invite_to_group():
     except ValueError:
         print("Número inválido.")
     
-    input("\nPressione Enter para continuar...")
+    # input("\nPressione Enter para continuar...")
 
 def send_group_invite(target_user, group_name):
     """Envia convite para um usuário entrar no grupo"""
@@ -588,7 +590,6 @@ def send_private_message():
         "from": USER_ID, 
         "value": message
     }), 2)
-    input("Mensagem enviada! Pressione Enter...")
 
 def send_group_message():
     """Envia mensagem para um grupo"""
@@ -596,7 +597,7 @@ def send_group_message():
     
     if not my_groups:
         print("Você não participa de nenhum grupo.")
-        input("\nPressione Enter para continuar...")
+        # input("\nPressione Enter para continuar...")
         return
     
     print("=== Meus Grupos ===")
@@ -627,7 +628,7 @@ def send_group_message():
     except ValueError:
         print("Número inválido.")
     
-    input("\nPressione Enter para continuar...")
+    # input("\nPressione Enter para continuar...")
 
 def list_my_groups():
     print('=== Meus Grupos ===')
@@ -656,7 +657,7 @@ def list_my_groups():
             
             print(f"   📊 Total de membros: {len(members)}")
     
-    input("\nPressione Enter para continuar...")
+    # input("\nPressione Enter para continuar...")
 
 def leave_group():
     """Sair de um grupo"""
@@ -664,7 +665,7 @@ def leave_group():
     
     if not my_groups:
         print("Você não participa de nenhum grupo.")
-        input("\nPressione Enter para continuar...")
+        # input("\nPressione Enter para continuar...")
         return
     
     print("=== Meus Grupos - Sair de Grupo ===")
@@ -700,7 +701,7 @@ def leave_group():
     except ValueError:
         print("Cancelado.")
     
-    input("\nPressione Enter para continuar...")
+    # input("\nPressione Enter para continuar...")
 
 def leave_group_action(group_name, group_info):
     """Executa a ação de sair do grupo"""
@@ -781,7 +782,7 @@ def remove_group():
     
     if not my_led_groups:
         print("Você não é líder de nenhum grupo.")
-        input("\nPressione Enter para continuar...")
+        # input("\nPressione Enter para continuar...")
         return
     
     print("=== Meus Grupos (Como Líder) - Remover Grupo ===")
@@ -813,7 +814,7 @@ def remove_group():
     except ValueError:
         print("Cancelado.")
     
-    input("\nPressione Enter para continuar...")
+    # input("\nPressione Enter para continuar...")
 
 def remove_group_action(group_name, group_info):
     """Executa a ação de remover o grupo"""
@@ -857,7 +858,7 @@ def list_groups():
             
             print(f"   📊 Total de membros: {len(members)}")
     
-    input("\nPressione Enter para continuar...")
+    # input("\nPressione Enter para continuar...")
 
 def menu():
     pending_count = pending_notifications.qsize() + group_invites.qsize()
@@ -912,7 +913,7 @@ def menu():
         list_my_groups()
     elif choice == "9":
         list_chats()
-        input("\nPressione Enter para continuar...")
+        # input("\nPressione Enter para continuar...")
     elif choice == "10":
         invite_to_group()
     elif choice == "11":
@@ -939,7 +940,7 @@ def exit_program():
 client = mqtt.Client(
     mqtt.CallbackAPIVersion.VERSION2,
     client_id=USER_ID, 
-    clean_session=False
+    clean_session=False,
 )
 client.on_connect = on_connect
 client.on_message = on_message
