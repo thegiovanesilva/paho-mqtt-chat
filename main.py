@@ -24,7 +24,7 @@ def on_connect(client: mqtt.Client, userdata, flags, rc, properties):
     print("Conectado ao broker MQTT")
     client.subscribe(f"{USER_ID}_Control", qos=2)
     client.subscribe(f"{USERS_TOPIC}/+", qos=2)
-    client.subscribe(f"{USERS_TOPIC}/{USER_ID}/CHATS", qos=2)
+    client.subscribe(f"{USERS_TOPIC}/{USER_ID}/chats", qos=2)
     client.subscribe(f"{GROUPS_TOPIC}/+/info", qos=2)
     client.subscribe(f"{GROUPS_TOPIC}/+/members", qos=2)
     client.subscribe(f"{GROUPS_TOPIC}/+/chat", qos=2)
@@ -35,8 +35,16 @@ def on_disconnect(client, userdata, rc):
     print(f"[Status] user '{USER_ID}' is now offline")
 
 def on_message(client, userdata, msg):
-    payload = msg.payload.decode()    
-    if msg.topic.startswith(USERS_TOPIC):
+    payload = msg.payload.decode()   
+
+    if msg.topic.endswith("/chats"):
+        control_message: dict[str, any] = json.loads(payload)
+        value: str = control_message.get("value")
+        if (len(value) > 0): 
+            value = value.split(";")
+            for v in value:
+                chats.add(v)
+    elif msg.topic.startswith(USERS_TOPIC):
         user_id = msg.topic.split('/')[-1]
         status = payload
         connected_users[user_id] = status
@@ -83,16 +91,16 @@ def on_message(client, userdata, msg):
             action = control_message.get("action")
             from_user = control_message.get("from")
             value: str = control_message.get("value")
-            print(control_message)
             if action == "chat_request" and from_user:
                 pending_notifications.put(("chat_request", from_user))
                 notification_event.set()
                 print(f"\nNova solicitação de chat de '{from_user}'! Digite '7' no menu para responder.")
             elif action == "chat_accepted" and from_user:
-                pending_notifications.put(("chat_accepted", from_user))
-                notification_event.set()
+                # pending_notifications.put(("chat_accepted", (from_user, value)))
+                # notification_event.set()
                 
                 print(f"\nSua solicitação de chat foi aceita por '{from_user}'!")
+                handle_chat_accepted(from_user, value)
             elif action == "group_invite" and from_user:
                 group_name = control_message.get("group_name")
                 group_invites.put((from_user, group_name))
@@ -151,6 +159,12 @@ def get_online_users():
 
 def get_offline_users():
     return [user_id for user_id, status in connected_users.items() if status == "offline"]
+
+def save_chats():
+    client.publish(f"{USERS_TOPIC}/{USER_ID}/chats", json.dumps({
+        "action": "chats",
+        "value": ";".join(chats)
+    }), qos=2, retain=True)
 
 def request_chat():
     target_user_id = input("Digite o ID do usuário com quem deseja conversar: ")
@@ -227,7 +241,8 @@ def process_pending_notifications():
                 if action == "chat_request":
                     handle_chat_request(from_user)
                 elif action == "chat_accepted":
-                    handle_chat_accepted(from_user)
+                    print("teste", from_user)
+                    # handle_chat_accepted(from_user[0], from_user[1])
             elif notif_type == "group" and action == "invite":
                 handle_group_invite(from_user, extra)
             elif notif_type == "group_request" and action == "group_join_request":
@@ -330,18 +345,21 @@ def handle_chat_request(from_user_id):
         one_to_one_topic = f"{USER_ID}_{from_user_id}"
         client.publish(f"{from_user_id}_Control", json.dumps({
             "action": "chat_accepted",
-            "from": USER_ID
+            "from": USER_ID,
+            "value": one_to_one_topic
         }), qos=2)
-        print(f"Chat iniciado no tópico '{one_to_one_topic}'")
+        # print(f"Chat iniciado no tópico '{one_to_one_topic}'")
         client.subscribe(one_to_one_topic, qos=2)
         chats.add(one_to_one_topic)
+        save_chats()
   
-def handle_chat_accepted(from_user_id):
-    print(f"Sua solicitação de chat foi aceita por '{from_user_id}'.")
-    one_to_one_topic = f"{USER_ID}_{from_user_id}"
-    print(f"Chat iniciado no tópico '{one_to_one_topic}'")
-    client.subscribe(one_to_one_topic, qos=2)
-    chats.add(one_to_one_topic)
+def handle_chat_accepted(from_user_id, topic_name):
+    print(f"Sua solicitação de chat foi aceita por '{from_user_id}' blblabla.")
+    # one_to_one_topic = f"{USER_ID}_{from_user_id}"
+    print(f"Chat iniciado no tópico '{topic_name}'")
+    client.subscribe(topic_name, qos=2)
+    chats.add(topic_name)
+    save_chats()
 
 def list_users():
     print('=== Usuários ===')
@@ -912,11 +930,7 @@ def menu():
 
 
 def exit_program():
-    client.publish(f"{USERS_TOPIC}/{USER_ID}", "offline", qos=2, retain=True)
-    client.publish(f"{USERS_TOPIC}/{USER_ID}/CHATS", json.dumps({
-        "action": "chats",
-        "value": ";".join(chats)
-    }), qos=2, retain=True)
+    client.publish(f"{USERS_TOPIC}/{USER_ID}", "offline", qos=2, retain=True)    
     client.loop_stop()
     client.disconnect()
     print(f"{USER_ID} Desconectado!")
