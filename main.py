@@ -1,3 +1,4 @@
+import datetime
 import paho.mqtt.client as mqtt
 import json
 import time
@@ -19,9 +20,16 @@ notification_event = threading.Event()
 chats: set[str] = set()
 groups: Dict[str, Dict[str, any]] = {}
 group_invites: Queue = Queue()
+historic: List[Dict[str, any]] = []
+
+def history_debug(type: str, user: str, timestamp: time.time):
+    historic.append({ "type": type, "payload": { "user": user, "timestamp": timestamp }})
+    
+def list_historic():
+    print("="*20, "Histórico", "="*20)
+    [print(f"{h.get('type')} -> {h.get('payload').get('user')} -> {h.get('payload').get('timestamp')}") for h in historic]
 
 def on_connect(client: mqtt.Client, userdata, flags, rc, properties):
-    print("Conectado ao broker MQTT")
     client.subscribe(f"{USER_ID}_Control", qos=2)
     client.subscribe(f"{USERS_TOPIC}/+", qos=2)
     client.subscribe(f"{USERS_TOPIC}/{USER_ID}/chats", qos=2)
@@ -29,7 +37,6 @@ def on_connect(client: mqtt.Client, userdata, flags, rc, properties):
     client.subscribe(f"{GROUPS_TOPIC}/+/members", qos=2)
     client.subscribe(f"{GROUPS_TOPIC}/+/chat", qos=2)
     client.publish(f"{USERS_TOPIC}/{USER_ID}", "online", qos=2, retain=True)
-    print(f"[Status] user '{USER_ID}' is now online")
 
 def on_disconnect(client, userdata, rc):
     print(f"[Status] user '{USER_ID}' is now offline")
@@ -39,7 +46,6 @@ def on_message(client, userdata, msg):
 
     if msg.topic.endswith("/chats"):
         control_message: dict[str, any] = json.loads(payload)
-        print("entrou aqui", control_message, payload)
         value: str = control_message.get("value")
         if (len(value) > 0): 
             value = value.split(";")
@@ -74,7 +80,6 @@ def on_message(client, userdata, msg):
                 except json.JSONDecodeError:
                     pass
             elif message_type == "chat":
-                print("SAI CAPIROTO")
                 try:
                     chat_message = json.loads(payload)
                     action = chat_message.get("action")
@@ -84,7 +89,6 @@ def on_message(client, userdata, msg):
                     if action == "message" and from_user != USER_ID:
                         if USER_ID in groups.get(group_name, {}).get("members", []):
                             print(f"\n[{group_name}] {from_user}: {value}")
-                            #input("Pressione Enter para continuar...")
                 except json.JSONDecodeError:
                     pass
     elif msg.topic == f"{USER_ID}_Control":
@@ -94,20 +98,25 @@ def on_message(client, userdata, msg):
             from_user = control_message.get("from")
             value: str = control_message.get("value")
             if action == "chat_request" and from_user:
+                history_debug("chat_request", from_user, datetime.datetime.now())
                 pending_notifications.put(("chat_request", from_user))
                 notification_event.set()
                 print(f"\nNova solicitação de chat de '{from_user}'! Digite '7' no menu para responder.")
-            elif action == "chat_accepted" and from_user:
-                # pending_notifications.put(("chat_accepted", (from_user, value)))
-                # notification_event.set()
-                
+            elif action == "chat_accepted" and from_user:    
+                history_debug("chat_accepted", from_user, datetime.datetime.now())
+                history_debug("chat_init", value, datetime.datetime.now())
                 print(f"\nSua solicitação de chat foi aceita por '{from_user}'!")
                 handle_chat_accepted(from_user, value)
             elif action == "group_invite" and from_user:
                 group_name = control_message.get("group_name")
                 group_invites.put((from_user, group_name))
                 print(f"\n🎉 Convite para o grupo '{group_name}' de '{from_user}'! Digite '7' no menu para responder.")
+                history_debug("group_invite_from", from_user, datetime.datetime.now())
+                history_debug("group_invite", group_name, datetime.datetime.now())
             elif action == "group_join_request" and from_user:
+                history_debug("group_join_request_from", from_user, datetime.datetime.now())
+                history_debug("group_join_request", group_name, datetime.datetime.now())
+
                 group_name = control_message.get("group_name")
                 
                 if from_user == USER_ID:
@@ -119,10 +128,13 @@ def on_message(client, userdata, msg):
             elif action == "group_join" and from_user:
                 group_name = control_message.get("group_name")
                 print(f"\n{from_user} entrou no grupo '{group_name}'!")
+                history_debug("group_join_user", from_user, datetime.datetime.now())
+                history_debug("group_join", group_name, datetime.datetime.now())
             elif action == "group_join_accepted" and from_user:
                 group_name = control_message.get("group_name")
                 print(f"\nSolicitação de entrada aceita por '{from_user}' no grupo '{group_name}'!")
                 chats.add(f"GROUP_{group_name}")
+                history_debug("group_join_accepted", from_user, datetime.datetime.now())
             elif action == "group_leadership_transferred" and from_user:
                 group_name = control_message.get("group_name")
                 print(f"\n👑 Você agora é o líder do grupo '{group_name}' (transferido por '{from_user}')!")
@@ -152,9 +164,7 @@ def on_message(client, userdata, msg):
             user_from = control_message.get("from") 
             if (user_from != USER_ID):
                 print(f"[{user_from}] > {value}")
-            
-            # input("...")    
-
+        
 
 def get_online_users():
     return [user_id for user_id, status in connected_users.items() if status == "online"]
@@ -173,9 +183,6 @@ def request_chat():
     if target_user_id == USER_ID:
         print("Você não pode iniciar uma conversa consigo mesmo.")
         return
-    if target_user_id not in connected_users or connected_users[target_user_id] != "online":
-        print(f"Usuário '{target_user_id}' não está online.")
-        return
 
     target_user_topic = f"{target_user_id}_Control"
     message = json.dumps({
@@ -184,6 +191,7 @@ def request_chat():
     })
     client.publish(target_user_topic, message, qos=2)
     print(f"Solicitação de chat enviada para '{target_user_id}'")
+    history_debug("chat_request", target_user_id, datetime.datetime.now())
 
 def process_pending_notifications():
     total_notifications = pending_notifications.qsize() + group_invites.qsize()
@@ -244,7 +252,6 @@ def process_pending_notifications():
                     handle_chat_request(from_user)
                 elif action == "chat_accepted":
                     print("teste", from_user)
-                    # handle_chat_accepted(from_user[0], from_user[1])
             elif notif_type == "group" and action == "invite":
                 handle_group_invite(from_user, extra)
             elif notif_type == "group_request" and action == "group_join_request":
@@ -278,6 +285,7 @@ def process_pending_notifications():
 
 def handle_group_invite(from_user, group_name):
     """Processa convite para grupo"""
+
     response = input(f"Convite para o grupo '{group_name}' de '{from_user}'. Aceitar? (S/n): ")
     
     if response.lower() != 'n':
@@ -354,10 +362,9 @@ def handle_chat_request(from_user_id):
         client.subscribe(one_to_one_topic, qos=2)
         chats.add(one_to_one_topic)
         save_chats()
+        history_debug("chat_init", one_to_one_topic, datetime.datetime.now())
   
 def handle_chat_accepted(from_user_id, topic_name):
-    print(f"Sua solicitação de chat foi aceita por '{from_user_id}' blblabla.")
-    # one_to_one_topic = f"{USER_ID}_{from_user_id}"
     print(f"Chat iniciado no tópico '{topic_name}'")
     client.subscribe(topic_name, qos=2)
     chats.add(topic_name)
@@ -381,8 +388,6 @@ def list_users():
             for user in offline_users:
                 print(f"  • {user}")
     
-    # input("\nPressione Enter para continuar...")
-
 def list_chats():
     print('=== Conversas ===')
     if len(chats) == 0:
@@ -423,13 +428,10 @@ def create_group():
     print(f"Grupo '{group_name}' criado com sucesso!")
     print(f"Você é o líder do grupo '{group_name}'")
     
-    # input("\nPressione Enter para continuar...")
-
 def join_group():
     """Função para entrar em um grupo existente ou solicitar entrada"""
     if not groups:
         print("Nenhum grupo disponível no momento.")
-        # input("\nPressione Enter para continuar...")
         return
     
     available_groups = []
@@ -441,7 +443,6 @@ def join_group():
     
     if not available_groups:
         print("Você já participa de todos os grupos disponíveis.")
-        # input("\nPressione Enter para continuar...")
         return
     
     print("=== Grupos Disponíveis para Entrada ===")
@@ -466,7 +467,6 @@ def join_group():
             
             if USER_ID in group_info.get("members", []):
                 print(f"Você já é membro do grupo '{group_name}'.")
-                # input("\nPressione Enter para continuar...")
                 return
             
             leader = group_info.get("leader")
@@ -479,8 +479,6 @@ def join_group():
     except ValueError:
         print("Cancelado.")
     
-    # input("\nPressione Enter para continuar...")
-
 def request_group_join(group_name, leader):
     """Solicita entrada em um grupo"""
     message = json.dumps({
@@ -499,7 +497,6 @@ def invite_to_group():
     
     if not my_led_groups:
         print("Você não é líder de nenhum grupo.")
-        # input("\nPressione Enter para continuar...")
         return
     
     print("=== Seus Grupos (Como Líder) ===")
@@ -523,7 +520,6 @@ def invite_to_group():
             
             if not available_users:
                 print("Nenhum usuário disponível para convite.")
-                # input("\nPressione Enter para continuar...")
                 return
             
             print("\n=== Usuários Disponíveis ===")
@@ -546,8 +542,6 @@ def invite_to_group():
     except ValueError:
         print("Número inválido.")
     
-    # input("\nPressione Enter para continuar...")
-
 def send_group_invite(target_user, group_name):
     """Envia convite para um usuário entrar no grupo"""
     message = json.dumps({
@@ -597,7 +591,6 @@ def send_group_message():
     
     if not my_groups:
         print("Você não participa de nenhum grupo.")
-        # input("\nPressione Enter para continuar...")
         return
     
     print("=== Meus Grupos ===")
@@ -628,8 +621,6 @@ def send_group_message():
     except ValueError:
         print("Número inválido.")
     
-    # input("\nPressione Enter para continuar...")
-
 def list_my_groups():
     print('=== Meus Grupos ===')
     my_groups = {name: info for name, info in groups.items() if USER_ID in info.get("members", [])}
@@ -657,15 +648,12 @@ def list_my_groups():
             
             print(f"   📊 Total de membros: {len(members)}")
     
-    # input("\nPressione Enter para continuar...")
-
 def leave_group():
     """Sair de um grupo"""
     my_groups = {name: info for name, info in groups.items() if USER_ID in info.get("members", [])}
     
     if not my_groups:
         print("Você não participa de nenhum grupo.")
-        # input("\nPressione Enter para continuar...")
         return
     
     print("=== Meus Grupos - Sair de Grupo ===")
@@ -701,8 +689,6 @@ def leave_group():
     except ValueError:
         print("Cancelado.")
     
-    # input("\nPressione Enter para continuar...")
-
 def leave_group_action(group_name, group_info):
     """Executa a ação de sair do grupo"""
     members = group_info.get("members", [])
@@ -782,7 +768,6 @@ def remove_group():
     
     if not my_led_groups:
         print("Você não é líder de nenhum grupo.")
-        # input("\nPressione Enter para continuar...")
         return
     
     print("=== Meus Grupos (Como Líder) - Remover Grupo ===")
@@ -814,8 +799,6 @@ def remove_group():
     except ValueError:
         print("Cancelado.")
     
-    # input("\nPressione Enter para continuar...")
-
 def remove_group_action(group_name, group_info):
     """Executa a ação de remover o grupo"""
     members = group_info.get("members", [])
@@ -858,8 +841,6 @@ def list_groups():
             
             print(f"   📊 Total de membros: {len(members)}")
     
-    # input("\nPressione Enter para continuar...")
-
 def menu():
     pending_count = pending_notifications.qsize() + group_invites.qsize()
     notification_indicator = f" ({pending_count}) Notificações pendentes" if pending_count > 0 else ""
@@ -877,6 +858,7 @@ def menu():
     print("10. Convidar para grupo")
     print("11. Sair de grupo")
     print("12. Remover grupo")
+    print("13. Mostrar histórico para debug")
     print("0. Sair")
     choice = input("> ")
 
@@ -913,13 +895,14 @@ def menu():
         list_my_groups()
     elif choice == "9":
         list_chats()
-        # input("\nPressione Enter para continuar...")
     elif choice == "10":
         invite_to_group()
     elif choice == "11":
         leave_group()
     elif choice == "12":
         remove_group()
+    elif choice == "13":
+        list_historic()
     elif choice == "0":
         exit_program()
         return False
@@ -952,9 +935,3 @@ client.loop_start()
 
 while menu():
     print()
-
-
-
-    
-
-
