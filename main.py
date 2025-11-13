@@ -369,6 +369,7 @@ def handle_chat_accepted(from_user_id, topic_name):
     client.subscribe(topic_name, qos=2)
     chats.add(topic_name)
     save_chats()
+    history_debug("chat_init", topic_name, datetime.datetime.now())
 
 def list_users():
     print('=== Usuários ===')
@@ -569,21 +570,42 @@ def send_message():
 
 def send_private_message():
     """Envia mensagem em chat 1-on-1"""
-    list_chats()
+    print("=== Minhas Conversas 1-on-1 ===")
     if not chats:
+        print("Nenhuma conversa encontrada.")
         return
     
-    to = input("Digite o id da conversa: ")
-    if to not in chats:
-        print("Conversa não encontrada.")
+    one_to_one_chats = [chat for chat in chats if not chat.startswith("GROUP_")]
+    
+    if not one_to_one_chats:
+        print("Nenhuma conversa 1-on-1 encontrada.")
         return
-        
-    message = input("[você] > ")
-    client.publish(to, json.dumps({
-        "action": "message",
-        "from": USER_ID, 
-        "value": message
-    }), 2)
+    
+    chat_list = list(one_to_one_chats)
+    for i, chat in enumerate(chat_list, 1):
+        print(f"{i}. {chat}")
+    
+    choice = input("\nDigite o número da conversa: ")
+    
+    try:
+        choice_idx = int(choice) - 1
+        if 0 <= choice_idx < len(chat_list):
+            to = chat_list[choice_idx]
+            
+            message = input(f"[{to}] você > ")
+            if message.strip():
+                client.publish(to, json.dumps({
+                    "action": "message",
+                    "from": USER_ID, 
+                    "value": message
+                }), 2)
+                print("Mensagem enviada!")
+            else:
+                print("Mensagem vazia, cancelado.")
+        else:
+            print("Número inválido.")
+    except ValueError:
+        print("Número inválido.")
 
 def send_group_message():
     """Envia mensagem para um grupo"""
