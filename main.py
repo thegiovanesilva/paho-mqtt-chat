@@ -117,9 +117,10 @@ def on_message(client, userdata, msg):
                 history_debug("group_invite", group_name, datetime.datetime.now())
             elif action == "group_join_request" and from_user:
                 history_debug("group_join_request_from", from_user, datetime.datetime.now())
-                history_debug("group_join_request", group_name, datetime.datetime.now())
 
                 group_name = control_message.get("group_name")
+                
+                history_debug("group_join_request", group_name, datetime.datetime.now())
                 
                 if from_user == USER_ID:
                     return
