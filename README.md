@@ -1,72 +1,75 @@
-================================================================================
-                    PAHO MQTT CHAT - APLICATIVO DE CHAT
-================================================================================
+ # PAHO MQTT CHAT
 
-IDENTIFICAÇÃO DOS AUTORES:
+Aplicativo de chat simples usando MQTT (biblioteca paho-mqtt).
+
+Este repositório contém uma implementação de exemplo de chat baseado em tópicos MQTT, com suporte a conversas one-to-one e grupos.
+
+## Autores
+
 - Giovane Gonçalves da Silva
 - Igor Andrey Ronsoni
 
-================================================================================
-REQUISITOS DO SISTEMA:
-================================================================================
+## Requisitos
 
-1. Python 3.7 ou superior instalado
-2. Bibliotecas Python necessárias:
-   - paho-mqtt
+- Python 3.9 ou superior
+- Biblioteca Python: `paho-mqtt`
 
-================================================================================
-INSTALAÇÃO DAS DEPENDÊNCIAS:
-================================================================================
+Instale a dependência com:
 
-Execute o comando abaixo para instalar a biblioteca necessária:
+```shell
+pip install paho-mqtt
+```
 
-    pip install paho-mqtt
+ou
 
-Ou, se estiver usando Python 3:
+```shell
+pip3 install paho-mqtt
+```
 
-    pip3 install paho-mqtt
+## Estrutura do projeto
 
-================================================================================
-ESTRUTURA DE ARQUIVOS:
-================================================================================
+- `main.py` — arquivo principal da aplicação
+- `README.md` — documentação (este arquivo)
 
-main.py                - Arquivo principal da aplicação
-README.md              - Este arquivo de documentação
-================================================================================
-CONFIGURAÇÃO:
-================================================================================
+## Configuração
 
-Antes de executar, certifique-se de que:
+Por padrão o cliente tenta conectar ao broker MQTT em `127.0.0.1:1883`.
+Se você usar outro broker/host/porta, ajuste as constantes/variáveis em `main.py` (por exemplo `BROKER` e `PORT`).
 
-1. Um servidor MQTT está rodando em 127.0.0.1:1883
-   (Padrão: localhost na porta 1883)
+## Como executar
 
-2. Se usar um broker diferente, edite as constantes em main.py:
-   - BROKER = "127.0.0.1"
-   - PORT = 1883
+1. Abra um terminal no diretório do projeto.
+2. Execute:
 
-================================================================================
-COMO EXECUTAR:
-================================================================================
+```shell
+python main.py
+```
 
-No terminal/prompt de comando, navegue até o diretório do projeto e execute:
+ou
 
-    python main.py
+```shell
+python3 main.py
+```
 
-Ou, se estiver usando Python 3 explicitamente:
+3. Ao iniciar, o programa solicitará um ID de usuário:
 
-    python3 main.py
+```
+Digite seu ID: <seu_nome_ou_id>
+```
 
-Você será solicitado a digitar seu ID de usuário:
+Repita em terminais diferentes para simular múltiplos usuários.
 
-    Digite seu ID: <seu_nome_ou_id>
+## Funcionalidades principais
 
-================================================================================
-FUNCIONALIDADES PRINCIPAIS:
-================================================================================
+- Listar usuários (online/offline)
+- Solicitação de conversa (one-to-one)
+- Criação e gerenciamento de grupos
+- Envio de mensagens privadas e em grupo
+- Listagem de histórico de eventos para debug
 
-Menu Interativo:
-1. Listar usuários (online/offline)
+Menu (exemplos de opções):
+
+1. Listar usuários
 2. Solicitar conversa (one-to-one)
 3. Criar grupo
 4. Listar grupos
@@ -78,65 +81,19 @@ Menu Interativo:
 10. Convidar para grupo
 11. Sair de grupo
 12. Remover grupo
-13. Mostrar histórico para debug (rastreia solicitações e aceitações de chat)
+13. Mostrar histórico para debug
 0. Sair
 
-================================================================================
-FUNCIONALIDADES DE DEPURAÇÃO:
-================================================================================
+## Exemplo rápido
 
-Histórico de Atividades:
-- Menu opção 13 lista o histórico completo de:
-  ✓ Solicitações de conversa recebidas
-  ✓ Solicitações aceitas
-  ✓ Tópicos de chat criados
-  ✓ Atividades de grupos
-  ✓ Timestamps de todas as operações
+1. Abra dois terminais e execute `python main.py` em cada um.
+2. Use IDs diferentes (por exemplo `usuario1` e `usuario2`).
+3. Em `usuario1`, solicite uma conversa com a opção correspondente.
+4. Em `usuario2`, responda a notificação e aceite a conversa.
+5. Ambos poderão trocar mensagens.
 
-================================================================================
-EXEMPLO DE USO:
-================================================================================
 
-1. Abra 2 terminais e execute o aplicativo em cada um
-2. Digite IDs diferentes (ex: usuario1, usuario2)
-3. No terminal do usuario1, escolha opção 2 para solicitar conversa
-4. No terminal do usuario2, escolha opção 7 para responder notificações
-5. Aceite a solicitação para iniciar o chat
-6. Agora ambos podem trocar mensagens
+## Notas
 
-================================================================================
-REQUISITOS FUNCIONAIS IMPLEMENTADOS:
-================================================================================
-
-✓ Solicitação de conversa (one-to-one)
-✓ Listagem de histórico de solicitações recebidas
-✓ Listagem de confirmações de aceite de chat
-✓ Exibição do tópico criado para iniciar bate-papo
-✓ Criação e gerenciamento de grupos
-✓ Mensagens privadas e em grupo
-✓ Controle de membros e liderança de grupos
-
-================================================================================
-RESOLUÇÃO DE PROBLEMAS:
-================================================================================
-
-Erro: "ModuleNotFoundError: No module named 'paho'"
-Solução: Execute "pip install paho-mqtt"
-
-Erro: "Conexão recusada"
-Solução: Verifique se o servidor MQTT está rodando em 127.0.0.1:1883
-
-Erro: "Nenhum usuário encontrado"
-Solução: Aguarde alguns segundos para as mensagens retained do broker
-         ou verifique se outros usuários estão conectados
-
-================================================================================
-NOTAS:
-================================================================================
-
-- O aplicativo usa MQTT com QoS 2 para garantir entrega de mensagens
-- As mensagens retained ajudam a manter o estado dos usuários
-- O histórico é armazenado em memória durante a execução
-- Feche com a opção 0 para desconectar corretamente
-
-================================================================================
+- O aplicativo usa QoS adequado para garantir a entrega conforme implementado em `main.py`.
+- O histórico é mantido em memória durante a execução do programa.
