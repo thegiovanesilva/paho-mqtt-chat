@@ -6,7 +6,7 @@ from typing import Dict, List
 from queue import Queue
 import threading
 
-BROKER = "127.0.0.1"
+BROKER = "test.mosquitto.org"
 PORT = 1883
 
 USER_ID = input("Digite seu ID: ")
@@ -99,14 +99,16 @@ def on_message(client, userdata, msg):
             value: str = control_message.get("value")
             if action == "chat_request" and from_user:
                 history_debug("chat_request", from_user, datetime.datetime.now())
-                pending_notifications.put(("chat_request", from_user))
+                topic = control_message.get("topic")
+                pending_notifications.put(("chat_request", from_user, topic))
                 notification_event.set()
                 print(f"\nNova solicitação de chat de '{from_user}'! Digite '7' no menu para responder.")
             elif action == "chat_accepted" and from_user:    
                 history_debug("chat_accepted", from_user, datetime.datetime.now())
-                history_debug("chat_init", value, datetime.datetime.now())
+                topic = control_message.get("topic")
+                history_debug("chat_init", topic, datetime.datetime.now())
                 print(f"\nSua solicitação de chat foi aceita por '{from_user}'!")
-                handle_chat_accepted(from_user, value)
+                handle_chat_accepted(from_user, topic)
             elif action == "group_invite" and from_user:
                 group_name = control_message.get("group_name")
                 group_invites.put((from_user, group_name))
@@ -178,6 +180,11 @@ def save_chats():
         "value": ";".join(chats)
     }), qos=1, retain=True)
 
+def generate_chat_topic(user1: str, user2: str) -> str:
+    """Gera um tópico único ordenando os IDs alfabeticamente"""
+    participants = sorted([user1, user2])
+    return f"{participants[0]}__{participants[1]}"
+
 def request_chat():
     target_user_id = input("Digite o ID do usuário com quem deseja conversar: ")
     if target_user_id == USER_ID:
@@ -185,9 +192,11 @@ def request_chat():
         return
 
     target_user_topic = f"{target_user_id}_Control"
+    one_to_one_topic = generate_chat_topic(USER_ID, target_user_id)
     message = json.dumps({
         "action": "chat_request",
-        "from": USER_ID
+        "from": USER_ID,
+        "topic": one_to_one_topic
     })
     client.publish(target_user_topic, message, qos=2)
     print(f"Solicitação de chat enviada para '{target_user_id}'")
@@ -214,8 +223,13 @@ def process_pending_notifications():
             action, from_user = notification
             all_notifications.append(("chat", action, from_user, None))
         elif len(notification) == 3:
-            action, from_user, group_name = notification
-            all_notifications.append(("group_request", action, from_user, group_name))
+            # Pode ser chat_request com topic ou group_request
+            if notification[0] == "chat_request":
+                action, from_user, topic = notification
+                all_notifications.append(("chat", action, from_user, topic))
+            else:
+                action, from_user, group_name = notification
+                all_notifications.append(("group_request", action, from_user, group_name))
     
     group_notifications = []
     while not group_invites.empty():
@@ -249,7 +263,7 @@ def process_pending_notifications():
             
             if notif_type == "chat":
                 if action == "chat_request":
-                    handle_chat_request(from_user)
+                    handle_chat_request(from_user, extra)
                 elif action == "chat_accepted":
                     print("teste", from_user)
             elif notif_type == "group" and action == "invite":
@@ -260,7 +274,10 @@ def process_pending_notifications():
             for i, (n_type, n_action, n_from, n_extra) in enumerate(all_notifications):
                 if i != choice_idx:
                     if n_type == "chat":
-                        pending_notifications.put((n_action, n_from))
+                        if n_action == "chat_request":
+                            pending_notifications.put((n_action, n_from, n_extra))
+                        else:
+                            pending_notifications.put((n_action, n_from))
                     elif n_type == "group":
                         group_invites.put((n_from, n_extra))
                     elif n_type == "group_request":
@@ -268,7 +285,10 @@ def process_pending_notifications():
         else:
             for n_type, n_action, n_from, n_extra in all_notifications:
                 if n_type == "chat":
-                    pending_notifications.put((n_action, n_from))
+                    if n_action == "chat_request":
+                        pending_notifications.put((n_action, n_from, n_extra))
+                    else:
+                        pending_notifications.put((n_action, n_from))
                 elif n_type == "group":
                     group_invites.put((n_from, n_extra))
                 elif n_type == "group_request":
@@ -277,7 +297,10 @@ def process_pending_notifications():
     except ValueError:
         for n_type, n_action, n_from, n_extra in all_notifications:
             if n_type == "chat":
-                pending_notifications.put((n_action, n_from))
+                if n_action == "chat_request":
+                    pending_notifications.put((n_action, n_from, n_extra))
+                else:
+                    pending_notifications.put((n_action, n_from))
             elif n_type == "group":
                 group_invites.put((n_from, n_extra))
             elif n_type == "group_request":
@@ -347,22 +370,24 @@ def handle_group_join_request(from_user, group_name):
     else:
         print("Solicitação recusada.")
 
-def handle_chat_request(from_user_id):
+def handle_chat_request(from_user_id, topic_name=None):
+    if not topic_name:
+        topic_name = generate_chat_topic(USER_ID, from_user_id)
+    
     response = input(f"Você tem uma solicitação de chat de '{from_user_id}'. Aceitar? (S/n): ")
     if response.lower() == 'n':
         print("Solicitação de chat recusada.")
     else:
-        one_to_one_topic = f"{USER_ID}_{from_user_id}"
         client.publish(f"{from_user_id}_Control", json.dumps({
             "action": "chat_accepted",
             "from": USER_ID,
-            "value": one_to_one_topic
+            "topic": topic_name
         }), qos=2)
-        print(f"Chat iniciado no tópico '{one_to_one_topic}'")
-        client.subscribe(one_to_one_topic, qos=2)
-        chats.add(one_to_one_topic)
+        print(f"Chat iniciado no tópico '{topic_name}'")
+        client.subscribe(topic_name, qos=2)
+        chats.add(topic_name)
         save_chats()
-        history_debug("chat_init", one_to_one_topic, datetime.datetime.now())
+        history_debug("chat_init", topic_name, datetime.datetime.now())
   
 def handle_chat_accepted(from_user_id, topic_name):
     print(f"Chat iniciado no tópico '{topic_name}'")
