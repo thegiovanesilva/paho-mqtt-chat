@@ -6,7 +6,7 @@ from typing import Dict, List
 from queue import Queue
 import threading
 
-BROKER = "test.mosquitto.org"
+BROKER = "127.0.0.1"
 PORT = 1883
 
 USER_ID = input("Digite seu ID: ")
@@ -183,10 +183,46 @@ def save_chats():
 def generate_chat_topic(user1: str, user2: str) -> str:
     """Gera um tópico único ordenando os IDs alfabeticamente"""
     participants = sorted([user1, user2])
-    return f"{participants[0]}__{participants[1]}"
+    print(participants)
+    return f"{participants[0]}_{participants[1]}"
 
 def request_chat():
-    target_user_id = input("Digite o ID do usuário com quem deseja conversar: ")
+    online = get_online_users()
+    offline = get_offline_users()
+    available = []
+    seen = set()
+    for u in online:
+        if u != USER_ID and u not in seen:
+            available.append((u, 'online'))
+            seen.add(u)
+    for u in offline:
+        if u != USER_ID and u not in seen:
+            available.append((u, 'offline'))
+            seen.add(u)
+
+    if not available:
+        print("Nenhum usuário disponível para chat no momento.")
+        return
+
+    print("=== Usuários disponíveis para chat ===")
+    for i, (u, status) in enumerate(available, 1):
+        print(f"{i}. {u} ({status})")
+
+    choice = input("Digite o número do usuário ou o ID do usuário: ").strip()
+    if not choice:
+        print("Operação cancelada.")
+        return
+
+    if choice.isdigit():
+        idx = int(choice) - 1
+        if 0 <= idx < len(available):
+            target_user_id = available[idx][0]
+        else:
+            print("Número inválido.")
+            return
+    else:
+        target_user_id = choice
+
     if target_user_id == USER_ID:
         print("Você não pode iniciar uma conversa consigo mesmo.")
         return
@@ -908,25 +944,9 @@ def menu():
     print("13. Mostrar histórico para debug")
     print("0. Sair")
     choice = input("> ")
-
     if choice == "1":
         list_users()
     elif choice == "2":
-        online_users = get_online_users()
-        
-        if online_users and len(online_users) > 1:
-            print("Usuários online disponíveis para chat:")
-            for i, user in enumerate(online_users, 1):
-                if user != USER_ID:
-                    print(f"{i}. {user}")
-
-        offline_users = get_offline_users()
-        if len(offline_users) > 0:
-            print("Usuários offline:")
-            for i, user in enumerate(offline_users, 1):
-                if user != USER_ID:
-                    print(f"{i}. {user}")
-
         request_chat()
     elif choice == "3":
         create_group()
@@ -953,7 +973,6 @@ def menu():
     elif choice == "0":
         exit_program()
         return False
-    
     else:
         print("Opção inválida!")
     return True
