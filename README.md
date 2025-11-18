@@ -29,7 +29,6 @@ pip3 install paho-mqtt
 ## Estrutura do projeto
 
 - `main.py` — arquivo principal da aplicação
-- `README.md` — documentação (este arquivo)
 
 ## Configuração
 
